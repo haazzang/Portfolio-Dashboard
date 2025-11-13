@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Portfolio Performance Dashboard</title>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #f5f6fa;
+      color: #222;
+    }
+    header {
+      background: #111827;
+      color: white;
+      padding: 16px 32px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    header h1 {
+      margin: 0;
+      font-size: 20px;
+    }
+    header p {
+      margin: 4px 0 0;
+      font-size: 12px;
+      opacity: 0.75;
+    }
+    .container {
+      padding: 24px 32px 40px;
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+    .section {
+      background: white;
+      border-radius: 10px;
+      padding: 20px 22px 26px;
+      margin-bottom: 20px;
+      box-shadow: 0 1px 4px rgba(15,23,42,0.08);
+    }
+    .section h2 {
+      margin-top: 0;
+      font-size: 18px;
+      margin-bottom: 4px;
+    }
+    .section p.desc {
+      margin-top: 0;
+      font-size: 12px;
+      color: #6b7280;
+      margin-bottom: 12px;
+    }
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    .chart {
+      width: 100%;
+      height: 420px;
+    }
+    .small {
+      height: 360px;
+    }
+    .footer-note {
+      font-size: 11px;
+      color: #6b7280;
+      margin-top: 4px;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #e5e7eb;
+      font-size: 10px;
+      margin-right: 6px;
+    }
+    .pill span {
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      margin-right: 4px;
+    }
+    .pill .equity {
+      background: #2563eb;
+    }
+    .pill .total {
+      background: #db2777;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Portfolio Performance Dashboard</h1>
+    <p>USD 기준 Equity vs Hedge, Alpha / Beta, Sector P&amp;L 기여도</p>
+  </header>
+
+  <div class="container">
+    <!-- Equity vs Hedge -->
+    <section class="section">
+      <h2>1. Equity vs Equity + Hedge (USD 누적 수익률)</h2>
+      <p class="desc">
+        <span class="pill"><span class="equity"></span>Equity Only</span>
+        <span class="pill"><span class="total"></span>Equity + Hedge</span>
+        <br />
+        <span style="font-size: 11px; color:#6b7280;">
+          Data: <code>portfolio_daily_USD_with_hedge.csv</code> (Equity_Cum_Return, Total_Cum_Return 기준, 일단위 누적)
+        </span>
+      </p>
+      <div id="equityHedgeChart" class="chart"></div>
+    </section>
+
+    <!-- Alpha / Beta -->
+    <section class="section">
+      <h2>2. Country Level Alpha &amp; Beta</h2>
+      <p class="desc">
+        각 국가별 벤치마크 대비 연간 알파 및 베타. (OLS 기반, 일 수익률 → 연환산)
+        <br />
+        <span style="font-size: 11px; color:#6b7280;">
+          Data: <code>alpha_beta_by_country.csv</code>
+        </span>
+      </p>
+      <div class="grid-2">
+        <div id="alphaChart" class="chart small"></div>
+        <div id="betaChart" class="chart small"></div>
+      </div>
+    </section>
+
+    <!-- Sector -->
+    <section class="section">
+      <h2>3. Sector Contribution (KRW 기준)</h2>
+      <p class="desc">
+        전체 기간 섹터별 총 PnL과, PnL 절대값 기준 상위 섹터들의 누적 PnL 타임라인.
+        <br />
+        <span style="font-size: 11px; color:#6b7280;">
+          Data: <code>sector_contribution_total_KRW.csv</code>, <code>sector_contribution_daily_KRW.csv</code>
+        </span>
+      </p>
+      <div class="grid-2">
+        <div id="sectorTotalChart" class="chart small"></div>
+        <div id="sectorCumChart" class="chart small"></div>
+      </div>
+      <div class="footer-note">
+        ※ 누적 PnL 그래프는 PnL 절대값 상위 섹터 Top 6 기준입니다.
+      </div>
+    </section>
+  </div>
+
+  <script>
+    // 간단한 CSV 파서 (콤마 구분, 큰따옴표 없는 전제)
+    function parseCSV(text) {
+      const lines = text.trim().split(/\r?\n/);
+      const header = lines[0].split(",");
+      const rows = lines.slice(1).map(line => {
+        const cols = line.split(",");
+        const obj = {};
+        header.forEach((h, i) => {
+          obj[h.trim()] = cols[i] !== undefined ? cols[i].trim() : "";
+        });
+        return obj;
+      });
+      return { header, rows };
+    }
+
+    async function loadCSV(path) {
+      const resp = await fetch(path);
+      if (!resp.ok) {
+        throw new Error("Failed to load " + path + " : " + resp.status);
+      }
+      const text = await resp.text();
+      return parseCSV(text);
+    }
+
+    function toNumber(v) {
+      if (v === undefined || v === null || v === "" || isNaN(Number(v))) return null;
+      return Number(v);
+    }
+
+    // 1) Equity vs Hedge Chart
+    async function buildEquityHedgeChart() {
+      try {
+        const { rows } = await loadCSV("portfolio_daily_USD_with_hedge.csv");
+        const dates = [];
+        const equityCum = [];
+        const totalCum = [];
+
+        rows.forEach(r => {
+          const d = new Date(r["Date"]);
+          if (isNaN(d)) return;
+          const e = toNumber(r["Equity_Cum_Return"]);
+          const t = toNumber(r["Total_Cum_Return"]);
+          dates.push(d);
+          equityCum.push(e !== null ? e * 100 : null);
+          totalCum.push(t !== null ? t * 100 : null);
+        });
+
+        const traceEquity = {
+          x: dates,
+          y: equityCum,
+          mode: "lines",
+          name: "Equity Only",
+          line: { width: 2, color: "#2563eb" }
+        };
+        const traceTotal = {
+          x: dates,
+          y: totalCum,
+          mode: "lines",
+          name: "Equity + Hedge",
+          line: { width: 2, color: "#db2777", dash: "dash" }
+        };
+
+        const layout = {
+          margin: { t: 30, r: 10, b: 40, l: 60 },
+          yaxis: { title: "Cumulative Return (%)", zeroline: true },
+          xaxis: { title: "Date" },
+          legend: { orientation: "h", x: 0, y: 1.1 },
+          hovermode: "x unified"
+        };
+
+        Plotly.newPlot("equityHedgeChart", [traceEquity, traceTotal], layout, {responsive:true});
+      } catch (e) {
+        console.error(e);
+        const el = document.getElementById("equityHedgeChart");
+        el.innerHTML = "<p style='color:#b91c1c;font-size:12px;'>Failed to load portfolio_daily_USD_with_hedge.csv<br/>" + e.message + "</p>";
+      }
+    }
+
+    // 2) Alpha / Beta charts
+    async function buildAlphaBetaCharts() {
+      try {
+        const { header, rows } = await loadCSV("alpha_beta_by_country.csv");
+
+        // Expect columns like: Country,alpha_ann,beta,r2,t_alpha,t_beta,ann_return,ann_vol,sharpe
+        const countryCol = header[0];
+        const alphaCol = header.find(h => h.includes("alpha_ann")) || "alpha_ann";
+        const betaCol  = header.find(h => h === "beta") || "beta";
+
+        const countries = [];
+        const alphaVals = [];
+        const betaVals  = [];
+
+        rows.forEach(r => {
+          const c = r[countryCol];
+          if (!c) return;
+          const a = toNumber(r[alphaCol]);
+          const b = toNumber(r[betaCol]);
+          countries.push(c);
+          alphaVals.push(a !== null ? a * 100 : null);
+          betaVals.push(b);
+        });
+
+        // Alpha bar
+        const traceAlpha = {
+          x: countries,
+          y: alphaVals,
+          type: "bar",
+          marker: { color: "#10b981" },
+          name: "Annual Alpha (%)"
+        };
+        const layoutAlpha = {
+          margin: { t: 30, r: 10, b: 50, l: 60 },
+          yaxis: { title: "Alpha (%)", zeroline: true },
+          xaxis: { title: "Country" },
+          hovermode: "closest"
+        };
+        Plotly.newPlot("alphaChart", [traceAlpha], layoutAlpha, {responsive:true});
+
+        // Beta bar
+        const traceBeta = {
+          x: countries,
+          y: betaVals,
+          type: "bar",
+          marker: { color: "#6366f1" },
+          name: "Beta"
+        };
+        const layoutBeta = {
+          margin: { t: 30, r: 10, b: 50, l: 60 },
+          yaxis: { title: "Beta", zeroline: true },
+          xaxis: { title: "Country" },
+          shapes: [
+            {
+              type: "line",
+              x0: -0.5,
+              x1: countries.length - 0.5,
+              y0: 1.0,
+              y1: 1.0,
+              line: { color: "#9ca3af", width: 1, dash: "dash" }
+            }
+          ],
+          hovermode: "closest"
+        };
+        Plotly.newPlot("betaChart", [traceBeta], layoutBeta, {responsive:true});
+
+      } catch (e) {
+        console.error(e);
+        document.getElementById("alphaChart").innerHTML =
+          "<p style='color:#b91c1c;font-size:12px;'>Failed to load alpha_beta_by_country.csv<br/>" + e.message + "</p>";
+        document.getElementById("betaChart").innerHTML = "";
+      }
+    }
+
+    // 3) Sector Total & Cumulative charts
+    async function buildSectorCharts() {
+      try {
+        const totalCSV = await loadCSV("sector_contribution_total_KRW.csv");
+        const dailyCSV = await loadCSV("sector_contribution_daily_KRW.csv");
+
+        // Total PnL by sector (barh)
+        const sectors = [];
+        const pnls = [];
+
+        totalCSV.rows.forEach(r => {
+          const s = r["sector"];
+          if (!s) return;
+          sectors.push(s);
+          pnls.push(toNumber(r["Daily_PnL_KRW"]));
+        });
+
+        // Sort by PnL ascending (for better barh display)
+        const zipped = sectors.map((s, i) => ({ sector: s, pnl: pnls[i] }));
+        zipped.sort((a, b) => a.pnl - b.pnl);
+
+        const sortedSectors = zipped.map(z => z.sector);
+        const sortedPnls    = zipped.map(z => z.pnl);
+
+        const traceTotal = {
+          x: sortedPnls,
+          y: sortedSectors,
+          type: "bar",
+          orientation: "h",
+          marker: { color: "#0ea5e9" },
+          name: "Total PnL (KRW)"
+        };
+        const layoutTotal = {
+          margin: { t: 30, r: 20, b: 40, l: 120 },
+          xaxis: { title: "Total PnL (KRW)" },
+          yaxis: { title: "Sector" },
+          hovermode: "closest"
+        };
+        Plotly.newPlot("sectorTotalChart", [traceTotal], layoutTotal, {responsive:true});
+
+        // Cumulative PnL over time for top |PnL| sectors
+        const absRank = zipped
+          .map(z => ({ sector: z.sector, abs: Math.abs(z.pnl) }))
+          .sort((a, b) => b.abs - a.abs);
+        const topN = 6;
+        const topSectors = absRank.slice(0, topN).map(z => z.sector);
+
+        // Build daily map {sector: [{date, pnl}]}
+        const dailyRaw = dailyCSV.rows.map(r => ({
+          date: new Date(r["Date"]),
+          sector: r["sector"],
+          pnl: toNumber(r["Daily_PnL_KRW"])
+        })).filter(d => !isNaN(d.date));
+
+        const sectorSeries = {};
+        topSectors.forEach(s => sectorSeries[s] = { x: [], y: [] });
+
+        // sort by date globally
+        dailyRaw.sort((a, b) => a.date - b.date);
+
+        const cumMap = {}; // running sums per sector
+        dailyRaw.forEach(d => {
+          if (!topSectors.includes(d.sector)) return;
+          const key = d.sector;
+          if (!(key in cumMap)) cumMap[key] = 0;
+          cumMap[key] += (d.pnl || 0);
+          sectorSeries[key].x.push(d.date);
+          sectorSeries[key].y.push(cumMap[key]);
+        });
+
+        const traces = [];
+        const palette = ["#1d4ed8", "#b91c1c", "#059669", "#a855f7", "#0f766e", "#f97316"];
+
+        topSectors.forEach((s, idx) => {
+          const series = sectorSeries[s];
+          if (!series.x.length) return;
+          traces.push({
+            x: series.x,
+            y: series.y,
+            mode: "lines",
+            name: s,
+            line: { width: 2, color: palette[idx % palette.length] }
+          });
+        });
+
+        const layoutCum = {
+          margin: { t: 30, r: 20, b: 40, l: 80 },
+          xaxis: { title: "Date" },
+          yaxis: { title: "Cumulative PnL (KRW)" },
+          hovermode: "x unified",
+          legend: { orientation: "v", x: 1.02, y: 1 }
+        };
+        Plotly.newPlot("sectorCumChart", traces, layoutCum, {responsive:true});
+
+      } catch (e) {
+        console.error(e);
+        document.getElementById("sectorTotalChart").innerHTML =
+          "<p style='color:#b91c1c;font-size:12px;'>Failed to load sector contribution CSVs<br/>" + e.message + "</p>";
+        document.getElementById("sectorCumChart").innerHTML = "";
+      }
+    }
+
+    // Run all builders on load
+    (function init() {
+      buildEquityHedgeChart();
+      buildAlphaBetaCharts();
+      buildSectorCharts();
+    })();
+  </script>
+</body>
+</html>
