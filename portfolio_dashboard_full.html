@@ -127,15 +127,16 @@
 <body>
   <header>
     <h1>Portfolio Performance Dashboard</h1>
-    <p>USD Performance, Alpha/Beta, Sector P&amp;L, NAV by Country &amp; Sector</p>
+    <p>USD Performance, Alpha/Beta, Sector P&amp;L, NAV &amp; Sector Weights</p>
   </header>
 
-  <!-- 탭 네비게이션 -->
+  <!-- Tabs -->
   <nav class="tabs">
     <button class="tab-btn active" data-tab="tab-performance">Performance</button>
     <button class="tab-btn" data-tab="tab-alpha-beta">Alpha / Beta</button>
     <button class="tab-btn" data-tab="tab-sector-pnl">Sector P&amp;L</button>
     <button class="tab-btn" data-tab="tab-nav">NAV View</button>
+    <button class="tab-btn" data-tab="tab-sector-weights">Sector Weights</button>
   </nav>
 
   <div class="container">
@@ -195,28 +196,40 @@
           <code>nav_correlation_matrix.csv</code>, <code>nav_high_corr_pairs.csv</code>
         </span>
       </p>
-      <!-- 4-1. Region P&L & Exposure -->
       <div class="grid-2" style="margin-bottom:18px;">
         <div id="navRegionExposureChart" class="chart small"></div>
         <div id="navRegionReturnChart" class="chart small"></div>
       </div>
-
-      <!-- 4-2. Stock Contribution (Top Winners / Losers) -->
       <div class="grid-2" style="margin-bottom:18px;">
         <div id="navTopWinnersChart" class="chart small"></div>
         <div id="navTopLosersChart" class="chart small"></div>
       </div>
-
-      <!-- 4-3. Sector Performance -->
       <div class="grid-2" style="margin-bottom:18px;">
         <div id="navSectorAlphaChart" class="chart small"></div>
         <div id="navSectorPnlChart" class="chart small"></div>
       </div>
-
-      <!-- 4-4. Correlation -->
       <div class="grid-2">
         <div id="navCorrHeatmap" class="chart small"></div>
         <div id="navHighCorrPairs" class="chart small"></div>
+      </div>
+    </section>
+
+    <!-- TAB 5: Sector Weights -->
+    <section class="section tab-pane" id="tab-sector-weights">
+      <h2>5. Sector Weights (Current &amp; History)</h2>
+      <p class="desc">
+        현재 포트폴리오 섹터 비중과 1주 / 1달 / 3달 / 6달 전과의 변화를 시각화합니다.<br/>
+        <span style="font-size: 11px; color:#6b7280;">
+          Current: <code>nav_sector_performance.csv</code> (Net_MV 기반)<br/>
+          Snapshots: <code>nav_sector_weights_snapshot.csv</code> (period, sector, weight_pct)
+        </span>
+      </p>
+      <div class="grid-2">
+        <div id="sectorWeightCurrent" class="chart small"></div>
+        <div id="sectorWeightChanges" class="chart small"></div>
+      </div>
+      <div class="footer-note">
+        ※ 스냅샷은 현재 보유 포지션을 기준으로 과거 가격/환율로 재계산한 GROSS 섹터 비중입니다.
       </div>
     </section>
   </div>
@@ -263,8 +276,7 @@
 
       buttons.forEach(btn => {
         btn.addEventListener("click", () => {
-          const id = btn.dataset.tab;
-          activateTab(id);
+          activateTab(btn.dataset.tab);
         });
       });
     })();
@@ -313,8 +325,8 @@
         Plotly.newPlot("equityHedgeChart", [traceEquity, traceTotal], layout, {responsive:true});
       } catch (e) {
         console.error(e);
-        const el = document.getElementById("equityHedgeChart");
-        el.innerHTML = "<p style='color:#b91c1c;font-size:12px;'>Failed to load portfolio_daily_USD_with_hedge.csv<br/>" + e.message + "</p>";
+        document.getElementById("equityHedgeChart").innerHTML =
+          "<p style='color:#b91c1c;font-size:12px;'>Failed to load portfolio_daily_USD_with_hedge.csv<br/>" + e.message + "</p>";
       }
     }
 
@@ -322,7 +334,6 @@
     async function buildAlphaBetaCharts() {
       try {
         const { header, rows } = await loadCSV("alpha_beta_by_country.csv");
-
         const countryCol = header[0];
         const alphaCol = header.find(h => h.includes("alpha_ann")) || "alpha_ann";
         const betaCol  = header.find(h => h === "beta") || "beta";
@@ -489,7 +500,7 @@
     // ===== 4) NAV Charts =====
     async function buildNavCharts() {
       try {
-        // 1) Region breakdown
+        // Region breakdown
         const regionCSV = await loadCSV("nav_region_breakdown.csv");
         const regions = [];
         const pnl = [];
@@ -503,7 +514,6 @@
           retPct.push((toNumber(r["return_report"]) || 0) * 100);
         });
 
-        // 1-A) Region P&L vs Net Exposure (bar)
         const tracePnl = {
           x: regions,
           y: pnl,
@@ -528,7 +538,6 @@
         };
         Plotly.newPlot("navRegionExposureChart", [tracePnl, traceNet], layoutRegion, {responsive:true});
 
-        // 1-B) Region Return (%)
         const traceRet = {
           x: regions,
           y: retPct,
@@ -545,7 +554,7 @@
         };
         Plotly.newPlot("navRegionReturnChart", [traceRet], layoutRet, {responsive:true});
 
-        // 2) Stock contribution (Top Winners / Losers)
+        // Stock contribution
         const contribCSV = await loadCSV("nav_contribution_by_stock.csv");
         const sorted = contribCSV.rows
           .map(r => ({
@@ -588,7 +597,7 @@
         Plotly.newPlot("navTopWinnersChart", [buildBarData(winners)], layoutW, {responsive:true});
         Plotly.newPlot("navTopLosersChart", [buildBarData(losers)], layoutL, {responsive:true});
 
-        // 3) Sector performance (P&L / Alpha)
+        // Sector performance
         const sectorCSV = await loadCSV("nav_sector_performance.csv");
         const secNames = [];
         const secPnl = [];
@@ -633,7 +642,7 @@
         };
         Plotly.newPlot("navSectorPnlChart", [tracePnlSec], layoutPnlSec, {responsive:true});
 
-        // 4) Correlation heatmap & high corr pairs
+        // Correlation heatmap
         const corrCSV = await loadCSV("nav_correlation_matrix.csv");
         const corrHeader = corrCSV.header;
         const tickers = corrHeader.slice(1);
@@ -694,12 +703,110 @@
       }
     }
 
+    // ===== 5) Sector Weights Charts =====
+    async function buildSectorWeightCharts() {
+      // 5-1. 현재 섹터 비중 (nav_sector_performance.csv 기반)
+      try {
+        const sectorCSV = await loadCSV("nav_sector_performance.csv");
+        const sectors = [];
+        const netMV = [];
+
+        sectorCSV.rows.forEach(r => {
+          if (r["Position_Type"] === "Total") return;
+          const s = r["sector"];
+          const mv = toNumber(r["Net_MV"]);
+          if (!s || mv === null) return;
+          sectors.push(s);
+          netMV.push(mv);
+        });
+
+        const totalGross = netMV.reduce((acc, v) => acc + Math.abs(v), 0);
+        const weights = netMV.map(v => totalGross > 0 ? Math.abs(v) / totalGross * 100 : 0);
+
+        const tracePie = {
+          labels: sectors,
+          values: weights,
+          type: "pie",
+          textinfo: "label+percent",
+          hovertemplate: "%{label}: %{value:.1f}%<extra></extra>"
+        };
+        const layoutPie = {
+          margin: { t: 20, r: 20, b: 20, l: 20 },
+          title: { text: "Current Sector Weights (Gross, % of |Net MV|)", font: { size: 14 } }
+        };
+        Plotly.newPlot("sectorWeightCurrent", [tracePie], layoutPie, {responsive:true});
+      } catch (e) {
+        console.error(e);
+        document.getElementById("sectorWeightCurrent").innerHTML =
+          "<p style='color:#b91c1c;font-size:12px;'>Failed to load nav_sector_performance.csv<br/>" + e.message + "</p>";
+      }
+
+      // 5-2. 섹터 비중 변화 (nav_sector_weights_snapshot.csv)
+      try {
+        const snapCSV = await loadCSV("nav_sector_weights_snapshot.csv");
+        const rows = snapCSV.rows;
+
+        if (!rows || rows.length === 0) {
+          document.getElementById("sectorWeightChanges").innerHTML =
+            "<p style='font-size:12px;color:#6b7280;'>No sector weight snapshots found.</p>";
+          return;
+        }
+
+        // period -> sector -> weight
+        const map = {};
+        const sectorSet = new Set();
+        rows.forEach(r => {
+          const p = r["period"];
+          const s = r["sector"];
+          const w = toNumber(r["weight_pct"]);
+          if (!p || !s || w === null) return;
+          sectorSet.add(s);
+          if (!map[p]) map[p] = {};
+          map[p][s] = w;
+        });
+
+        const allSectors = Array.from(sectorSet).sort();
+        const periodOrder = ["Current", "1W", "1M", "3M", "6M"];
+        const traces = [];
+        const palette = ["#1d4ed8", "#16a34a", "#f97316", "#a855f7", "#e11d48"];
+
+        periodOrder.forEach((p, idx) => {
+          if (!map[p]) return;
+          const y = allSectors.map(s => map[p][s] !== undefined ? map[p][s] : null);
+          traces.push({
+            x: allSectors,
+            y,
+            type: "bar",
+            name: p,
+            marker: { color: palette[idx % palette.length] }
+          });
+        });
+
+        const layout = {
+          barmode: "group",
+          margin: { t: 30, r: 20, b: 80, l: 80 },
+          xaxis: { title: "Sector", tickangle: -35 },
+          yaxis: { title: "Weight (%)", rangemode: "tozero" },
+          legend: { orientation: "h", x: 0, y: 1.15 },
+          hovermode: "closest",
+          title: { text: "Sector Weight Changes (Current vs 1W / 1M / 3M / 6M)", font: { size: 14 } }
+        };
+
+        Plotly.newPlot("sectorWeightChanges", traces, layout, {responsive:true});
+      } catch (e) {
+        console.error(e);
+        document.getElementById("sectorWeightChanges").innerHTML =
+          "<p style='color:#b91c1c;font-size:12px;'>Failed to load nav_sector_weights_snapshot.csv<br/>" + e.message + "</p>";
+      }
+    }
+
     // ===== 초기 실행 =====
     (function init() {
       buildEquityHedgeChart();
       buildAlphaBetaCharts();
       buildSectorCharts();
       buildNavCharts();
+      buildSectorWeightCharts();
     })();
   </script>
 </body>
